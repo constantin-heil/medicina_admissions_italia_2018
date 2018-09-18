@@ -1,0 +1,117 @@
+---
+title: "Analysis medicine test 2018"
+output:
+  html_document:
+    df_print: paged
+---
+
+### This notebook analyses the 2018 medicine admissions test from 6 Italian cities. This analysis therefore takes into account 18.092 students from a total of around 67.000 
+
+```{r message=F}
+library(tidyverse)
+library(pdftools)
+library(stringr)
+library(kableExtra)
+```
+
+```{r}
+pruned_line <- function(line){
+  temp <- str_split(line, "\\s", simplify = T)
+  temp <- temp[temp != ""]
+  temp
+}
+
+scrape_pdf <- function(fname){
+  text_from_pdf <- unlist(str_split(pdf_text(fname), "\n"))
+  data_list <- unlist(text_from_pdf[str_detect(text_from_pdf,"^[0-9]")])
+  data_list <- lapply(data_list, function(x) pruned_line(x))
+  temp <- lapply(data_list, function(e) as.data.frame(t(e)))
+  temp <- bind_rows(temp)
+  colnames(temp) <- c("code", "Logica", "Coltura", "Bio", "Chim", "MatFis", "total")
+  temp <- temp %>% gather(key, val, 2:7) %>% mutate(val = as.numeric(val)) %>% spread(key, val)
+
+  as_tibble(temp)
+}
+```
+
+
+```{r}
+fname <- list.files( pattern="*.pdf")
+cities <- str_remove(fname, ".pdf")
+```
+
+```{r warning=FALSE}
+df_list <- lapply(fname, scrape_pdf)
+names(df_list) <- cities
+```
+
+```{r}
+for (i in seq_along(df_list)){
+  df_list[[i]]$citta <- names(df_list)[i]
+}
+```
+
+```{r}
+df_full <- bind_rows(df_list)
+```
+
+# Distribution of individual subject scores, by city
+```{r}
+df_full %>% ggplot(aes(x = total, fill = citta)) + geom_density() + facet_wrap(~citta, ncol=1) + labs(title = "Total points")
+```
+
+```{r}
+df_full %>% ggplot(aes(x = Bio, fill = citta)) + geom_density() + facet_wrap(~citta, ncol=1)+ labs(title = "Biology points")
+```
+
+```{r}
+df_full %>% ggplot(aes(x = Chim, fill = citta)) + geom_density() + facet_wrap(~citta, ncol=1)+ labs(title = "Chemistry points")
+```
+
+```{r}
+df_full %>% ggplot(aes(x = Coltura, fill = citta)) + geom_density() + facet_wrap(~citta, ncol=1)+ labs(title = "Culture points")
+```
+
+```{r}
+df_full %>% ggplot(aes(x = Logica, fill = citta)) + geom_density() + facet_wrap(~citta, ncol=1)+ labs(title = "Logic points")
+```
+
+```{r}
+df_full %>% ggplot(aes(x = MatFis, fill = citta)) + geom_density() + facet_wrap(~citta, ncol=1)+ labs(title = "Math/Physics points")
+```
+
+```{r}
+df_full$Bio <- df_full$Bio / 18
+df_full$Chim <- df_full$Chim / 12
+df_full$Coltura <- df_full$Coltura / 2
+df_full$Logica <- df_full$Logica / 20
+df_full$MatFis <- df_full$MatFis / 8
+```
+
+# Scores have been normalized to number of questions so they can be compared 
+```{r}
+df_full %>% gather(subject, score, 2:7) %>% group_by(subject) %>% summarise(mean = mean(score), sd = sd(score)) %>% filter(subject != "total") %>% ggplot(aes(x = subject, y = mean, fill = subject)) + geom_col() + geom_errorbar(aes(ymin = (mean-sd), ymax = (mean+sd)), width=.1) + labs(title="Averages and sd of scores by subject, national aggregate")
+```
+
+```{r}
+df_full %>% gather(subject, score, 2:7) %>% filter(subject != "total") %>% ggplot(aes(x=subject, y = score, fill = citta)) + geom_boxplot() + labs(title="All subjects compared between cities", subtitle="All subjects except Coltura show strong northern bias")
+
+```
+
+### Calculate minimum entry score by finding the lowest top-n score, where n is number of places at that university
+```{r}
+find_minimum_passing <- function(df, num_positions){
+  tot_score <- df$total
+  tot_score <- tot_score[order(tot_score, decreasing = T)]
+  return(tot_score[num_positions])
+}
+```
+
+```{r}
+number_positions <- c(297, 320, 320, 833, 130, 378)
+min_entry <- sapply(seq_along(df_list), function(x) find_minimum_passing(df_list[[x]], number_positions[x]))
+names(min_entry) <- cities
+
+as.data.frame(min_entry) %>% kable() %>% kable_styling()
+```
+
